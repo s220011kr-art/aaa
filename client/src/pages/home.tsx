@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import { FlashOverlay } from '@/components/FlashOverlay';
 import { Button } from '@/components/ui/button';
+import { firebaseService } from '@/lib/firebase';
 
 export default function Home() {
   const [isFlashing, setIsFlashing] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [messageCount, setMessageCount] = useState(0);
+  const [lastMessage, setLastMessage] = useState<string>('');
 
   const triggerFlash = () => {
     if (isFlashing) return;
@@ -43,11 +46,19 @@ export default function Home() {
       const firebaseConfig = await response.json();
       console.log('Firebase設定を取得しました:', firebaseConfig);
       
-      // Firebase接続をシミュレート（実際のFirebase接続は環境変数が必要）
-      setTimeout(() => {
-        setConnectionStatus('connected');
-        console.log('Firebase接続をシミュレートしました');
-      }, 1000);
+      // 実際のFirebaseに接続
+      await firebaseService.connect(firebaseConfig);
+      
+      // メッセージの監視を開始
+      firebaseService.startListening('/messages', (data) => {
+        console.log('新しいメッセージを受信:', data);
+        setMessageCount(prev => prev + 1);
+        setLastMessage(JSON.stringify(data));
+        triggerFlash();
+      });
+      
+      setConnectionStatus('connected');
+      console.log('Firebase接続が完了しました');
       
     } catch (error) {
       console.error('接続エラー:', error);
@@ -56,9 +67,21 @@ export default function Home() {
     }
   };
 
+  const disconnectFromFirebase = () => {
+    firebaseService.disconnect();
+    setConnectionStatus('disconnected');
+    setMessageCount(0);
+    setLastMessage('');
+    console.log('Firebaseから切断しました');
+  };
   useEffect(() => {
     // アプリ起動時に接続を試行
     connectToFirebase();
+    
+    // クリーンアップ
+    return () => {
+      firebaseService.disconnect();
+    };
   }, []);
 
   return (
@@ -66,9 +89,9 @@ export default function Home() {
       <FlashOverlay isFlashing={isFlashing} />
       
       <div className="min-h-screen bg-white" data-testid="main-container">
-        {/* デバッグ用のコントロールパネル */}
-        <div className="fixed top-4 right-4 bg-gray-100 p-4 rounded-lg shadow-lg max-w-sm">
-          <h3 className="text-lg font-semibold mb-3">デバッグパネル</h3>
+        {/* Firebase監視パネル */}
+        <div className="fixed top-4 right-4 bg-white border border-gray-200 p-4 rounded-lg shadow-lg max-w-sm">
+          <h3 className="text-lg font-semibold mb-3">Firebase監視システム</h3>
           
           <div className="mb-3">
             <div className="flex items-center mb-2">
@@ -92,6 +115,14 @@ export default function Home() {
             )}
           </div>
 
+          <div className="mb-3 text-sm">
+            <p>受信メッセージ数: <span className="font-bold">{messageCount}</span></p>
+            {lastMessage && (
+              <p className="text-xs text-gray-600 mt-1">
+                最新: {lastMessage.substring(0, 50)}...
+              </p>
+            )}
+          </div>
           <div className="space-y-2">
             <Button 
               onClick={testFlash} 
@@ -101,14 +132,29 @@ export default function Home() {
               {isFlashing ? `点滅中 (${countdown}秒)` : 'テスト点滅'}
             </Button>
             
-            <Button 
-              onClick={connectToFirebase} 
-              variant="outline" 
-              className="w-full"
-              disabled={connectionStatus === 'connecting'}
-            >
-              再接続
-            </Button>
+            {connectionStatus === 'connected' ? (
+              <Button 
+                onClick={disconnectFromFirebase} 
+                variant="outline" 
+                className="w-full"
+              >
+                切断
+              </Button>
+            ) : (
+              <Button 
+                onClick={connectToFirebase} 
+                variant="outline" 
+                className="w-full"
+                disabled={connectionStatus === 'connecting'}
+              >
+                {connectionStatus === 'connecting' ? '接続中...' : '再接続'}
+              </Button>
+            )}
+          </div>
+          
+          <div className="mt-3 text-xs text-gray-500">
+            <p>監視パス: /messages</p>
+            <p>新しいデータが追加されると画面が緑色に点滅します</p>
           </div>
         </div>
       </div>
